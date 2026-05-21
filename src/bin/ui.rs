@@ -38,7 +38,7 @@ fn main() -> eframe::Result<()> {
     // with their saved log level. Otherwise the form's log-level combobox
     // would only ever take effect via env var or after Save → restart, and
     // users on the UI binary (issue #401) reasonably expect the saved
-    // config.json `log_level` to apply at boot like it does for the CLI.
+    // config.toml `log_level` to apply at boot like it does for the CLI.
     let (form, load_err) = load_form();
     let initial_toast = load_err.map(|e| (e, Instant::now()));
 
@@ -252,36 +252,36 @@ struct FormState {
     normalize_x_graphql: bool,
     youtube_via_relay: bool,
     passthrough_hosts: Vec<String>,
-    /// Round-tripped from config.json so the UI's save path doesn't
+    /// Round-tripped from config.toml so the UI's save path doesn't
     /// drop the user's setting. Not currently exposed as a UI control;
-    /// users edit `block_quic` directly in `config.json` (Issue #213).
+    /// users edit `block_quic` directly in `config.toml` (Issue #213).
     block_quic: bool,
-    /// Round-tripped from config.json and exposed beside QUIC blocking.
+    /// Round-tripped from config.toml and exposed beside QUIC blocking.
     /// Default true to push WebRTC apps toward TCP TURN instead of slow
     /// UDP ICE retries.
     block_stun: bool,
-    /// Round-tripped from config.json. Not exposed as a UI control —
+    /// Round-tripped from config.toml. Not exposed as a UI control —
     /// users edit `disable_padding` directly when needed (Issue #391).
     /// Default false (padding active).
     disable_padding: bool,
-    /// Round-tripped from config.json. Not exposed as a UI control —
+    /// Round-tripped from config.toml. Not exposed as a UI control —
     /// users edit `force_http1` directly when needed. Default false
     /// (HTTP/2 multiplexing on the relay leg active).
     force_http1: bool,
-    /// Round-tripped from config.json. Not exposed in the UI form yet —
+    /// Round-tripped from config.toml. Not exposed in the UI form yet —
     /// the bypass-DoH default is the right answer for almost everyone
     /// (DoH already encrypts, the tunnel was just adding latency), so
     /// this is a config-only opt-out. See config.rs `tunnel_doh`.
     tunnel_doh: bool,
     /// User-supplied DoH hostnames added to the built-in default list,
-    /// round-tripped from config.json. See config.rs `bypass_doh_hosts`.
+    /// round-tripped from config.toml. See config.rs `bypass_doh_hosts`.
     bypass_doh_hosts: Vec<String>,
     /// PR #763: when true, immediately reject browser DoH CONNECTs so the
     /// browser falls back to system DNS (tun2proxy virtual DNS — instant).
-    /// Round-tripped from config.json. Desktop UI doesn't expose a toggle
+    /// Round-tripped from config.toml. Desktop UI doesn't expose a toggle
     /// yet — Android does. See config.rs `block_doh`.
     block_doh: bool,
-    /// Multi-edge fronting groups. Round-tripped from config.json so
+    /// Multi-edge fronting groups. Round-tripped from config.toml so
     /// the UI's Save doesn't drop the user's hand-edited groups —
     /// there is no UI editor for these yet, only file-edited config.
     /// See config.rs `fronting_groups`.
@@ -311,28 +311,17 @@ fn load_form() -> (FormState, Option<String>) {
     // fails so the user isn't silently shown a blank form (issue: user reports
     // 'settings saved to file but not loaded back'). Without this signal the
     // failure is invisible — `.ok()` swallows it and the form looks fresh.
-    let path = data_dir::config_path();
-    let cwd = PathBuf::from("config.json");
+    let path = data_dir::resolve_config_path(None);
 
     let (existing, load_err): (Option<Config>, Option<String>) = if path.exists() {
         tracing::info!("config: attempting load from {}", path.display());
         match Config::load(&path) {
-            Ok(c) => {
+            Ok((c, _)) => {
                 tracing::info!("config: loaded OK from {}", path.display());
                 (Some(c), None)
             }
             Err(e) => {
                 let msg = format!("Config at {} failed to load: {}", path.display(), e);
-                tracing::warn!("{}", msg);
-                (None, Some(msg))
-            }
-        }
-    } else if cwd.exists() {
-        tracing::info!("config: attempting fallback load from {}", cwd.display());
-        match Config::load(&cwd) {
-            Ok(c) => (Some(c), None),
-            Err(e) => {
-                let msg = format!("Config at {} failed to load: {}", cwd.display(), e);
                 tracing::warn!("{}", msg);
                 (None, Some(msg))
             }
@@ -431,7 +420,7 @@ fn load_form() -> (FormState, Option<String>) {
             youtube_via_relay: false,
             passthrough_hosts: Vec::new(),
             block_quic: true,
-            block_stun: true,
+            block_stun: false,
             disable_padding: false,
             force_http1: false,
             tunnel_doh: true,
@@ -609,7 +598,7 @@ impl FormState {
             // tun2proxy's virtual DNS handles name lookups, saving the
             // ~1.5s tunnel round-trip per DNS query). Desktop UI doesn't
             // expose a toggle yet (Android does), so this is a config-only
-            // round-trip — we keep whatever the user has in config.json.
+            // round-trip — we keep whatever the user has in config.toml.
             block_doh: self.block_doh,
             // Multi-edge fronting groups: file-edited only for now,
             // round-tripped through the UI so Save doesn't drop them.
@@ -642,8 +631,9 @@ fn save_config(cfg: &Config) -> Result<PathBuf, String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    let json = serde_json::to_string_pretty(&ConfigWire::from(cfg)).map_err(|e| e.to_string())?;
-    std::fs::write(&path, json).map_err(|e| e.to_string())?;
+    let toml_str = toml::to_string_pretty(&mhrv_rs::config::TomlConfig::from(cfg))
+        .map_err(|e| e.to_string())?;
+    std::fs::write(&path, toml_str).map_err(|e| e.to_string())?;
     Ok(path)
 }
 
@@ -695,8 +685,8 @@ struct ConfigWire<'a> {
     /// emit only when the user has explicitly disabled the block.
     #[serde(skip_serializing_if = "is_true")]
     block_doh: bool,
-    /// Default true. Emit only when the user disables STUN/TURN blocking.
-    #[serde(skip_serializing_if = "is_true")]
+    /// Default false. Emit only when the user enables STUN/TURN blocking.
+    #[serde(skip_serializing_if = "is_false")]
     block_stun: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     fronting_groups: &'a Vec<FrontingGroup>,
@@ -1092,7 +1082,7 @@ impl eframe::App for App {
                 // text field — typing `0.0.0.0` from memory is enough of
                 // a friction point that almost no one does it. Power
                 // users with a custom bind IP (specific NIC) can still
-                // edit `listen_host` directly in `config.json`; we
+                // edit `listen_host` directly in `config.toml`; we
                 // detect that case and show a "Custom bind" badge so
                 // the checkbox doesn't silently overwrite their setting
                 // on the next Save.
@@ -1122,14 +1112,14 @@ impl eframe::App for App {
                     if is_custom_bind {
                         // The user manually wrote a specific bind IP —
                         // don't let the checkbox stomp on it. Show what
-                        // they have and tell them to edit config.json
+                        // they have and tell them to edit config.toml
                         // if they want to change it.
                         ui.vertical(|ui| {
                             ui.label(egui::RichText::new(format!(
                                 "Custom bind: {}",
                                 listen_host_snapshot
                             )).color(egui::Color32::from_rgb(220, 180, 100)));
-                            ui.small("Edit `listen_host` in config.json to change.");
+                            ui.small("Edit `listen_host` in config.toml to change.");
                         });
                     } else {
                         let mut share = was_share_on_lan;
@@ -1608,7 +1598,7 @@ impl eframe::App for App {
                      and delete the on-disk ca/ directory. NSS cleanup (Firefox/Chrome) \
                      is best-effort and logs a hint if certutil is missing or a browser \
                      has the DB locked. A fresh CA is generated the next time you start \
-                     the proxy. Your config.json and the Apps Script deployment are NOT \
+                     the proxy. Your config.toml and the Apps Script deployment are NOT \
                      touched — no need to redeploy Code.gs."
                 };
                 ui.add_enabled_ui(!proxy_active && !running && !cert_op_in_flight, |ui| {
@@ -2412,7 +2402,7 @@ fn background_thread(shared: Arc<Shared>, rx: Receiver<Cmd>) {
                             push_log(&shared2, &format!("[ui] {}", outcome.summary()));
                             push_log(
                                 &shared2,
-                                "[ui] config.json and Apps Script deployment untouched",
+                                "[ui] config.toml and Apps Script deployment untouched",
                             );
                         }
                         Err(e) => {

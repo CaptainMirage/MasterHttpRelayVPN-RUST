@@ -26,7 +26,7 @@
  *   4. (Optional) Set CACHE_SPREADSHEET_ID to enable caching
  *   5. Click Deploy → New deployment
  *   6. Type: Web app  |  Execute as: Me  |  Who has access: Anyone
- *   7. Copy the Deployment ID into config.json as "script_id"
+ *   7. Copy the Deployment ID into config.toml as "script_id"
  *
  * CHANGE THE AUTH KEY BELOW TO YOUR OWN SECRET!
  */
@@ -203,14 +203,6 @@ function _doSingle(req) {
     var opts = _buildOpts(req);
     var resp = UrlFetchApp.fetch(req.u, opts);
 
-    // Raw-return mode for exit-node path.
-    // r:true = return destination body verbatim so Rust gets {s,h,b} unwrapped.
-    if (req.r === true) {
-      return ContentService
-        .createTextOutput(resp.getContentText())
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-
     return _json({
       s: resp.getResponseCode(),
       h: _respHeaders(resp),
@@ -316,7 +308,7 @@ function _buildOpts(req) {
   var opts = {
     method: (req.m || "GET").toLowerCase(),
     muteHttpExceptions: true,
-    followRedirects: true,          // ← always true; r flag now has different meaning
+    followRedirects: req.r !== false,
     validateHttpsCertificates: true,
     escaping: false,
   };
