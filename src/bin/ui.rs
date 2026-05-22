@@ -294,6 +294,7 @@ struct FormState {
     auto_blacklist_window_secs: u64,
     auto_blacklist_cooldown_secs: u64,
     request_timeout_secs: u64,
+    stream_timeout_secs: u64,
     /// Optional second-hop exit node for CF-anti-bot bypass (chatgpt.com /
     /// claude.ai / grok.com / x.com). Config-only — no UI editor yet.
     /// See `assets/exit_node/` for the generic exit-node handler.
@@ -391,6 +392,7 @@ fn load_form() -> (FormState, Option<String>) {
             auto_blacklist_window_secs: c.auto_blacklist_window_secs,
             auto_blacklist_cooldown_secs: c.auto_blacklist_cooldown_secs,
             request_timeout_secs: c.request_timeout_secs,
+            stream_timeout_secs: c.stream_timeout_secs,
             exit_node: c.exit_node.clone(),
         }
     } else {
@@ -433,6 +435,7 @@ fn load_form() -> (FormState, Option<String>) {
             auto_blacklist_window_secs: 30,
             auto_blacklist_cooldown_secs: 120,
             request_timeout_secs: 30,
+            stream_timeout_secs: 300,
             exit_node: mhrv_rs::config::ExitNodeConfig::default(),
         }
     };
@@ -618,6 +621,7 @@ impl FormState {
             auto_blacklist_window_secs: self.auto_blacklist_window_secs,
             auto_blacklist_cooldown_secs: self.auto_blacklist_cooldown_secs,
             request_timeout_secs: self.request_timeout_secs,
+            stream_timeout_secs: self.stream_timeout_secs,
             // Exit-node config (CF-anti-bot bypass for chatgpt.com / claude.ai
             // / grok.com / x.com). Round-trip through FormState — config-only
             // editing for now, UI editor planned for v1.9.x desktop UI batch.
@@ -702,6 +706,8 @@ struct ConfigWire<'a> {
     auto_blacklist_cooldown_secs: u64,
     #[serde(skip_serializing_if = "is_default_timeout_secs")]
     request_timeout_secs: u64,
+    #[serde(skip_serializing_if = "is_default_stream_timeout_secs")]
+    stream_timeout_secs: u64,
     /// HTTP/2 multiplexing kill switch. Default false (h2 active); only
     /// emitted on save when the user has explicitly disabled h2, so
     /// unchanged configs stay clean.
@@ -720,6 +726,7 @@ fn is_default_strikes(v: &u32) -> bool { *v == 3 }
 fn is_default_window_secs(v: &u64) -> bool { *v == 30 }
 fn is_default_cooldown_secs(v: &u64) -> bool { *v == 120 }
 fn is_default_timeout_secs(v: &u64) -> bool { *v == 30 }
+fn is_default_stream_timeout_secs(v: &u64) -> bool { *v == 300 }
 fn is_default_exit_node(en: &&mhrv_rs::config::ExitNodeConfig) -> bool {
     !en.enabled
         && en.relay_url.is_empty()
@@ -787,6 +794,7 @@ impl<'a> From<&'a Config> for ConfigWire<'a> {
             auto_blacklist_window_secs: c.auto_blacklist_window_secs,
             auto_blacklist_cooldown_secs: c.auto_blacklist_cooldown_secs,
             request_timeout_secs: c.request_timeout_secs,
+            stream_timeout_secs: c.stream_timeout_secs,
             force_http1: c.force_http1,
             exit_node: &c.exit_node,
         }
@@ -2636,7 +2644,8 @@ fn install_ui_tracing(shared: Arc<Shared>, config_level: &str) {
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_target(false)
         .with_ansi(false)
-        .with_writer(writer);
+        .with_writer(writer)
+        .with_timer(mhrv_rs::logging::CompactUtcTime);
 
     let _ = tracing_subscriber::registry()
         .with(filter_layer)
