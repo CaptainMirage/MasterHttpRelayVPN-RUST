@@ -1,6 +1,6 @@
 [package]
 name = "mhrv-rs"
-version = "1.9.31"
+version = "1.9.33"
 edition = "2021"
 description = "Rust port of MasterHttpRelayVPN -- DPI bypass via Google Apps Script relay with domain fronting"
 license = "MIT"
@@ -48,6 +48,7 @@ toml = "0.8"
 h2 = "0.4"
 http = "1"
 flate2 = "1"
+zstd = "0.13"
 directories = "5"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # 64-bit atomics on 32-bit MIPS/ARMv5 targets. Rust's std AtomicU64 is
